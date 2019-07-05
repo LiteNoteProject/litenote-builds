@@ -1,0 +1,50 @@
+include config.mk
+
+BUILD_TRIPLE = $(shell uname -m)-pc-linux-gnu
+TARGET_TRIPLE = x86_64-linux-gnu
+
+BUILD_DIR = build/for-$(TARGET_TRIPLE)
+SRC_DIR := $(abspath $(BUILD_DIR)/litenote)
+
+all: $(BUILD_DIR)/PKG_STAMP $(SRC_DIR)/src/litenoted $(SRC_DIR)/src/litenote-cli $(BUILD_DIR)/litenote-core.tar.gz
+
+$(BUILD_DIR):
+	[ ! -d $(BUILD_DIR) ] && debootstrap --arch amd64 $(DEBOOTSTRAP_DISTRO) $(BUILD_DIR) $(DEBOOTSTRAP_MIRROR)
+
+$(BUILD_DIR)/PKG_STAMP: $(BUILD_DIR)
+	chroot $(BUILD_DIR) bash -c 'apt update && apt install -y software-properties-common && \
+		add-apt-repository -y universe && add-apt-repository -y ppa:bitcoin/bitcoin && apt update && \
+		apt install -y build-essential g++ libc-dev libtool autotools-dev automake pkg-config libssl-dev curl'
+	echo Hello > $@
+
+$(SRC_DIR):
+	mkdir -p $(BUILD_DIR)
+	git clone $(GIT_URL) $@
+	cd $@; git checkout $(GIT_BRANCH) || true
+
+pull: $(SRC_DIR)
+	cd $(SRC_DIR); git pull
+	touch $(SRC_DIR)
+
+$(SRC_DIR)/src/Makefile:
+	chroot $(BUILD_DIR) bash -c 'cd /litenote; cd depends; make HOST=$(TARGET_TRIPLE) NO_QT=1'
+	chroot $(BUILD_DIR) bash -c 'cd /litenote; ./autogen.sh && ./configure --prefix=/litenote/depends/$(TARGET_TRIPLE) LDFLAGS=-static-libstdc++'
+
+$(SRC_DIR)/src/litenoted: $(SRC_DIR) $(SRC_DIR)/src/Makefile
+	chroot $(BUILD_DIR) bash -c 'cd /litenote; make'
+	strip $(SRC_DIR)/src/litenote-cli
+	strip $(SRC_DIR)/src/litenoted
+
+$(SRC_DIR)/src/litenote-cli: $(SRC_DIR) $(SRC_DIR)/src/Makefile
+	chroot $(BUILD_DIR) bash -c 'cd /litenote; make'
+	strip $(SRC_DIR)/src/litenote-cli
+	strip $(SRC_DIR)/src/litenoted
+
+$(BUILD_DIR)/litenote-core.tar.gz: $(SRC_DIR)/src/litenoted $(SRC_DIR)/src/litenote-cli
+	cd $(SRC_DIR)/src; tar -cvzf $(abspath $@) litenoted litenote-cli
+
+clean:
+	cd $(SRC_DIR); make clean
+
+purge:
+	rm -rf $(BUILD_DIR)

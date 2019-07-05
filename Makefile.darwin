@@ -1,0 +1,44 @@
+include config.mk
+
+BUILD_TRIPLE = $(shell uname -m)-pc-linux-gnu
+TARGET_TRIPLE = x86_64-apple-darwin14
+
+BUILD_DIR = build/for-$(TARGET_TRIPLE)
+SRC_DIR := $(abspath $(BUILD_DIR)/litenote)
+
+all: $(SRC_DIR)/src/litenoted $(SRC_DIR)/src/litenote-cli $(BUILD_DIR)/litenote-core.zip
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+$(SRC_DIR):
+	mkdir -p $(BUILD_DIR)
+	git clone $(GIT_URL) $@
+	cd $@; git checkout $(GIT_BRANCH) || true
+
+pull: $(SRC_DIR)
+	cd $(SRC_DIR); git pull
+
+$(SRC_DIR)/src/Makefile:
+	cd $(SRC_DIR)/depends; make HOST=$(TARGET_TRIPLE) BUILD=$(BUILD_TRIPLE)
+	cd $(SRC_DIR); ./autogen.sh
+	cd $(SRC_DIR); CONFIG_SITE=$(SRC_DIR)/depends/$(TARGET_TRIPLE)/share/config.site ./configure --prefix=/
+
+$(SRC_DIR)/src/litenoted: $(SRC_DIR) $(SRC_DIR)/src/Makefile
+	cd $(SRC_DIR); make
+	strip $(SRC_DIR)/src/litenote-cli
+	strip $(SRC_DIR)/src/litenoted
+
+$(SRC_DIR)/src/litenote-cli: $(SRC_DIR) $(SRC_DIR)/src/Makefile
+	cd $(SRC_DIR); make
+	strip $(SRC_DIR)/src/litenote-cli
+	strip $(SRC_DIR)/src/litenoted
+
+$(BUILD_DIR)/litenote-core.tar.gz: $(SRC_DIR)/src/litenoted $(SRC_DIR)/src/litenote-cli
+	cd $(SRC_DIR)/src; tar -cvzf $(abspath $@) litenoted litenote-cli
+
+clean:
+	cd $(SRC_DIR); make clean
+
+purge:
+	rm -rf $(BUILD_DIR)
